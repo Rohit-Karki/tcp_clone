@@ -9,7 +9,7 @@ from TCPpacket import TCPpacket
 
 
 class Streamer:
-    send_seqeunce_no = 0
+    send_sequence_no = 0
     receive_sequence_number = 0
 
     send_buffer = {}
@@ -35,7 +35,6 @@ class Streamer:
         self.socket.bind((src_ip, src_port))
         self.dst_ip = dst_ip
         self.dst_port = dst_port
-        self.sequence_no = 0
 
         self.executor = ThreadPoolExecutor(max_workers=2)
         self.recv_thread = self.executor.submit(self.recv_async)
@@ -51,19 +50,17 @@ class Streamer:
             chunk_end_index = min(len(data_bytes), (chunk_index + 1) * self.chunk_size)
 
             packet = TCPpacket(
-                sequence_no=self.send_seqeunce_no,
+                sequence_no=self.send_sequence_no,
                 data_bytes=data_bytes[chunk_start_index:chunk_end_index],
             )
             # print("sending packet: ", packet.sequence_no)
 
-            self.send_buffer[self.send_seqeunce_no] = (packet, 0)
-            self.send_seqeunce_no += 1
+            self.send_buffer[self.send_sequence_no] = (packet, 0)
+            self.send_sequence_no += 1
             chunk_index += 1
 
     def send_ack(self, acknowledgement_number: int):
-        ack_packet = TCPpacket(
-            sequence_no=acknowledgement_number, data_bytes=b"", ack=True
-        )
+        ack_packet = TCPpacket(sequence_no=acknowledgement_number, ack=True)
         self.socket.sendto(ack_packet.pack(), (self.dst_ip, self.dst_port))
 
     def send_async(self):
@@ -75,19 +72,25 @@ class Streamer:
                     if isinstance(copy_buffer[val], tuple):
                         packet, time_sent = copy_buffer[val]
                         # print("Checking packet: ", packet.sequence_no)
-                        if time_sent is None:
+                        if time_sent is not None:
+                            if time.time() - time_sent > self.time_out_seconds:
+                                # But if the packet crosses the timeout then we need to resend
+                                self.socket.sendto(
+                                    packet.pack(), (self.dst_ip, self.dst_port)
+                                )
+                                self.send_buffer[packet.sequence_no] = (
+                                    packet,
+                                    time.time(),
+                                )
+                        else:
                             # this means we got an ack for this packet
                             del self.send_buffer[packet.sequence_no]
-                        elif time.time() - time_sent > self.time_out_seconds:
-                            # But if the packet crosses the timeout then we need to resend
-                            self.socket.sendto(
-                                packet.pack(), (self.dst_ip, self.dst_port)
-                            )
-                            self.send_buffer[packet.sequence_no] = (packet, time.time())
                             # now wait for ACK packet from the receiver
+                        pass
             except Exception as e:
                 print("listener died!")
                 print(e)
+            time.sleep(self.default_wait_seconds)
         return True
 
     def recv(self) -> bytes:
