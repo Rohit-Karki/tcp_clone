@@ -39,7 +39,7 @@ class TCPpacket:
 
         self.ack = flags == b'1'
         self.fin = flags == b'2'
-        self.data_bytes = packet[3:]
+        # data_bytes already unpacked correctly from struct.unpack above
 
     def __str__(self):
         return str(self.sequence_no) + '\n' + self.data_bytes.decode(

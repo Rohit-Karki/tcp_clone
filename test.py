@@ -6,13 +6,19 @@ NUMS = 1000
 
 
 def receive(s):
+    if s.dst_port == 8000:
+        print("host2 receiving")        
     expected = 0
     str_buf = ""
     while expected < NUMS:
+        if s.dst_port == 8000:
+            print("waiting for number %d" % expected)
+            print("self.receive_buffer is ", s.receive_buffer)
         data = s.recv()
-        # print("recv returned {%s}" % data.decode("utf-8"))
+        print("recv returned {%s}" % data.decode("utf-8"))
         str_buf += data.decode("utf-8")
         for t in str_buf.split(" "):
+            print("processing token {%s}" % t)
             if len(t) == 0:
                 # there could be a "" at the start or the end, if a space is there
                 continue
@@ -45,8 +51,9 @@ def host1(listen_port, remote_port):
     while i < NUMS:
         buf += "%d " % i
         if len(buf) > 12345 or i == NUMS - 1:
-            # print("sending ")
+            print("sending host1 and buffer is length %d" % len(buf))
             s.send(buf.encode("utf-8"))
+            print("self.send_buffer is ", s.send_buffer)
             buf = ""
         i += 1
     s.close()
@@ -63,8 +70,9 @@ def host2(listen_port, remote_port):
     # send small pieces of data
     for i in range(NUMS):
         buf = "%d " % i
-        print("sending ")
+        print("sending host2")
         s.send(buf.encode("utf-8"))
+    print("receive now")
     receive(s)
     s.close()
     print("STAGE 2 TEST PASSED!")
