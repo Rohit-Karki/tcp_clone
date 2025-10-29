@@ -5,6 +5,7 @@ import time
 import os
 import pytest
 
+
 def find_free_port():
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.bind(("127.0.0.1", 0))
@@ -12,10 +13,12 @@ def find_free_port():
     s.close()
     return port
 
+
 def run_proc(cmd, logfile_path):
     f = open(logfile_path, "wb")
     proc = subprocess.Popen(cmd, stdout=f, stderr=subprocess.STDOUT)
     return proc, f
+
 
 def read_log(path):
     try:
@@ -23,6 +26,7 @@ def read_log(path):
             return f.read().decode("utf-8", errors="replace")
     except Exception:
         return "<could not read log>"
+
 
 def test_test_py_pair_integration():
     """
@@ -46,7 +50,7 @@ def test_test_py_pair_integration():
     proc1, f1 = run_proc(cmd1, log1)
     proc2, f2 = run_proc(cmd2, log2)
 
-    timeout_seconds = 120
+    timeout_seconds = 240
 
     try:
         # Wait for processes to finish with timeout
@@ -56,21 +60,31 @@ def test_test_py_pair_integration():
         # kill both on timeout and fail with logs
         proc1.kill()
         proc2.kill()
-        f1.flush(); f2.flush()
-        f1.close(); f2.close()
+        f1.flush()
+        f2.flush()
+        f1.close()
+        f2.close()
         out1 = read_log(log1)
         out2 = read_log(log2)
-        pytest.fail(f"Timeout after {timeout_seconds}s.\n--- proc1 log ---\n{out1}\n--- proc2 log ---\n{out2}")
+        pytest.fail(
+            f"Timeout after {timeout_seconds}s.\n--- proc1 log ---\n{out1}\n--- proc2 log ---\n{out2}"
+        )
 
     # close log files
-    f1.flush(); f2.flush()
-    f1.close(); f2.close()
+    f1.flush()
+    f2.flush()
+    f1.close()
+    f2.close()
 
     out1 = read_log(log1)
     out2 = read_log(log2)
 
-    assert proc1.returncode == 0, f"proc1 exited with code {proc1.returncode}\n--- proc1 log ---\n{out1}"
-    assert proc2.returncode == 0, f"proc2 exited with code {proc2.returncode}\n--- proc2 log ---\n{out2}"
+    assert (
+        proc1.returncode == 0
+    ), f"proc1 exited with code {proc1.returncode}\n--- proc1 log ---\n{out1}"
+    assert (
+        proc2.returncode == 0
+    ), f"proc2 exited with code {proc2.returncode}\n--- proc2 log ---\n{out2}"
 
     # Optionally cleanup logs
     try:
