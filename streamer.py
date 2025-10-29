@@ -18,29 +18,29 @@ class Streamer:
 
         self.send_buffer = {}  # Packets waiting for ACK: {seq_no: (packet, time_sent)}
         self.receive_buffer = {}  # Received out-of-order packets: {seq_no: packet}
-        
+
         # State flags
         self.self_half_closed = False
         self.remote_closed = False
         self.closed = False
         self.received_fin = False
-        
+
         # Configuration
         self.chunk_size = 1446
         self.time_out_seconds = 0.25
         self.fin_grace_period = 2
         self.default_wait_seconds = 0.01
-        
+
         # Synchronization
         self.lock = threading.Lock()
         self.ack_received = threading.Condition(self.lock)
-        
+
         # Initialize socket
         self.socket = LossyUDP()
         self.socket.bind((src_ip, src_port))
         self.dst_ip = dst_ip
         self.dst_port = dst_port
-        
+
         # Start background threads
         self.executor = ThreadPoolExecutor(max_workers=2)
         self.recv_thread = self.executor.submit(self.recv_async)
@@ -53,23 +53,23 @@ class Streamer:
         while chunk_index * self.chunk_size < len(data_bytes):
             chunk_start_index = chunk_index * self.chunk_size
             chunk_end_index = min(len(data_bytes), (chunk_index + 1) * self.chunk_size)
-            
+
             packet = TCPpacket(
                 sequence_no=self.send_sequence_no,
                 data_bytes=data_bytes[chunk_start_index:chunk_end_index],
             )
-            
+
             # Send packet immediately (pipelining - don't wait for ACK)
             time_sent = time.time()
             self.socket.sendto(packet.pack(), (self.dst_ip, self.dst_port))
-            
+
             # Add to send_buffer to track waiting for ACK
             with self.lock:
                 self.send_buffer[self.send_sequence_no] = (packet, time_sent)
-            
+
             self.send_sequence_no += 1
             chunk_index += 1
-        
+
         # Wait for all sent packets to be ACKed
         while True:
             with self.lock:
@@ -82,7 +82,7 @@ class Streamer:
         """Send an ACK packet for the given sequence number."""
         ack_packet = TCPpacket(sequence_no=acknowledgement_number, ack=True)
         self.socket.sendto(ack_packet.pack(), (self.dst_ip, self.dst_port))
-    
+
     def retransmit_loop(self):
         """Background thread that retransmits packets that have timed out."""
         while not self.closed:
@@ -94,7 +94,7 @@ class Streamer:
                         if time.time() - time_sent > self.time_out_seconds:
                             # Packet timed out - needs retransmission
                             to_retransmit.append((seq_no, packet))
-                
+
                 # Retransmit outside the lock to avoid holding it too long
                 for seq_no, packet in to_retransmit:
                     self.socket.sendto(packet.pack(), (self.dst_ip, self.dst_port))
@@ -105,7 +105,7 @@ class Streamer:
                 print("retransmit_loop died!")
                 print(e)
                 break
-            
+
             time.sleep(self.default_wait_seconds)
         return True
 
@@ -129,7 +129,7 @@ class Streamer:
                 if data is not None and data != b"":
                     packet = TCPpacket()
                     packet.unpack(data)
-                    
+
                     with self.lock:
                         if packet.ack:
                             # Received an ACK - remove packet from send_buffer
@@ -140,7 +140,7 @@ class Streamer:
                             # Received FIN packet
                             self.received_fin = True
                             self.remote_closed = True
-                    
+
                     # Send ACK outside the lock to avoid holding lock too long
                     if packet.ack:
                         pass  # Already handled
@@ -169,18 +169,18 @@ class Streamer:
                 if len(self.send_buffer) == 0:
                     break
             time.sleep(self.default_wait_seconds)
-        
+
         # Step 2: Send FIN packet
         fin_packet = TCPpacket(sequence_no=self.send_sequence_no, fin=True)
         time_sent = time.time()
         fin_seq = self.send_sequence_no
         self.send_sequence_no += 1
-        
+
         with self.lock:
             self.send_buffer[fin_seq] = (fin_packet, time_sent)
-        
+
         self.socket.sendto(fin_packet.pack(), (self.dst_ip, self.dst_port))
-        
+
         # Step 3: Wait for ACK of FIN packet (with retries)
         fin_acked = False
         while not fin_acked:
@@ -189,27 +189,27 @@ class Streamer:
                 if fin_seq not in self.send_buffer:
                     fin_acked = True
                     break
-                
+
                 # Check for timeout
                 packet, sent_time = self.send_buffer[fin_seq]
                 if time.time() - sent_time > self.time_out_seconds:
                     # Resend FIN
                     self.socket.sendto(fin_packet.pack(), (self.dst_ip, self.dst_port))
                     self.send_buffer[fin_seq] = (fin_packet, time.time())
-            
+
             time.sleep(self.default_wait_seconds)
-        
+
         # Step 4: Wait until we receive FIN from other side
         self.self_half_closed = True
         while not self.remote_closed:
             time.sleep(self.default_wait_seconds)
-        
+
         # Step 5: Wait grace period (allow for potential retransmission of FIN ACK)
         time.sleep(self.fin_grace_period)
-        
+
         # Step 6: Stop threads
         self.closed = True
         self.socket.stoprecv()
-        
+
         # Step 7: Shutdown executor
         self.executor.shutdown(wait=True)
